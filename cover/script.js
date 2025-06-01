@@ -30,15 +30,27 @@ let CONFIG = { // Default config, will be overridden by JSON
         numNoiseBlocksPerWave: 250,
         noiseMaxBlockAlpha: 0.6,
         noiseSpreadFactor: 2.5,
+    },
+    debugMode: { // Default debug settings
+        enabled: false,
+        startPaused: false,
+        timeSliderMax: 60
     }
 };
 
 const canvas = document.getElementById('waveCanvas');
 const ctx = canvas.getContext('2d');
 
-let waves = [];
+// UI Elements
+let uiControlsContainer, pausePlayButton, timeSlider, timeValueDisplay, exportButton;
+
+let allWavesEver = []; // Master list of all waves
+let activeWaves = [];  // Waves currently active and to be rendered
+
 let globalTime = 0;
 let lastTimestamp = 0;
+let isPaused = false;
+let animationFrameId = null;
 
 function getDistance(x1, y1, x2, y2) {
     const dx = x1 - x2;
@@ -48,8 +60,8 @@ function getDistance(x1, y1, x2, y2) {
 
 function setupCanvas() {
     // Use actual window dimensions if specified in config
-    CONFIG.canvasWidth = (CONFIG.canvasWidth === "innerWidth" ? window.innerWidth : CONFIG.canvasWidth);
-    CONFIG.canvasHeight = (CONFIG.canvasHeight === "innerHeight" ? window.innerHeight : CONFIG.canvasHeight);
+    CONFIG.canvasWidth = (CONFIG.canvasWidth === "innerWidth" ? window.innerWidth : parseInt(CONFIG.canvasWidth, 10));
+    CONFIG.canvasHeight = (CONFIG.canvasHeight === "innerHeight" ? window.innerHeight : parseInt(CONFIG.canvasHeight, 10));
 
     canvas.width = CONFIG.canvasWidth;
     canvas.height = CONFIG.canvasHeight;
@@ -66,62 +78,117 @@ function pulse(d, fc, tau, sig) {
 }
 
 function addWave(x, y, startTime = globalTime) {
-    if (waves.length >= CONFIG.interaction.maxWaves) {
-        waves.shift();
+    // Limit total waves ever created if necessary, or manage memory another way
+    // For now, just add to a potentially growing list.
+    if (allWavesEver.length > (CONFIG.interaction.maxWaves * 5) && CONFIG.debugMode.enabled) { // Heuristic limit in debug
+        // console.warn("Large number of waves in allWavesEver, consider implications for long debug sessions.");
     }
-    waves.push({
+     if (!CONFIG.debugMode.enabled && allWavesEver.length > CONFIG.interaction.maxWaves * 2) {
+        // In non-debug mode, if not clearing allWavesEver periodically, it could grow.
+        // A more robust solution might involve periodic cleanup of very old waves from allWavesEver
+        // if they are far beyond any possible scrollback time.
+        // For now, this example doesn't implement that cleanup.
+        allWavesEver.shift(); // Simple FIFO if not in debug mode and list gets too long
+    }
+
+
+    allWavesEver.push({
+        id: Date.now().toString(36) + Math.random().toString(36).substr(2), // Unique ID
         x: x,
         y: y,
         creationTime: startTime,
+        // fc and sig are static per wave type, store them here
         fc: CONFIG.waveDynamics.carrierFrequency / 100.0,
         sig: CONFIG.waveDynamics.gaussianWidth,
-        isDisintegrating: false,
-        disintegrationEffectStartTime: 0,
-        tauAtDisintegration: 0,
     });
+    // If in debug mode and paused, immediately update to show the new wave
+    if (CONFIG.debugMode.enabled && isPaused) {
+        updateAndFilterWaves();
+        draw();
+    }
 }
 
-function updateWaves(deltaTime) {
-    globalTime += deltaTime;
+function updateAndFilterWaves() {
+    const newActiveWaves = [];
 
-    waves = waves.filter(wave => {
-        const age = globalTime - wave.creationTime;
-        const currentTau = age * CONFIG.waveDynamics.waveSpeed;
+    for (const waveData of allWavesEver) {
+        const age = globalTime - waveData.creationTime;
 
-        if (CONFIG.disintegration.enabled && !wave.isDisintegrating && age > CONFIG.disintegration.startAgeSeconds) {
-            wave.isDisintegrating = true;
-            wave.disintegrationEffectStartTime = globalTime;
-            wave.tauAtDisintegration = currentTau; // Capture tau when disintegration starts
+        if (age < 0) continue; // Wave hasn't started yet
+
+        const currentWaveState = { ...waveData }; // Base properties
+        currentWaveState.age = age;
+        currentWaveState.currentTau = age * CONFIG.waveDynamics.waveSpeed;
+
+        // Determine disintegration status for this frame
+        currentWaveState.isDisintegrating = false;
+        currentWaveState.timeSinceDisintegrationTrigger = 0;
+        currentWaveState.disintegrationTransitionProgress = 0;
+
+        if (CONFIG.disintegration.enabled && age > CONFIG.disintegration.startAgeSeconds) {
+            currentWaveState.isDisintegrating = true;
+            const disintegrationEffectActualStartTime = waveData.creationTime + CONFIG.disintegration.startAgeSeconds;
+            currentWaveState.timeSinceDisintegrationTrigger = globalTime - disintegrationEffectActualStartTime;
+            
+            if (currentWaveState.timeSinceDisintegrationTrigger >= 0) {
+                 currentWaveState.disintegrationTransitionProgress = Math.min(1, currentWaveState.timeSinceDisintegrationTrigger / CONFIG.disintegration.transitionDurationSeconds);
+            } else {
+                // This case (negative timeSinceDisintegrationTrigger) implies globalTime is before the trigger,
+                // so it shouldn't be disintegrating yet. The age > startAgeSeconds check should handle this.
+                // For safety, reset disintegration state if somehow triggered prematurely.
+                currentWaveState.isDisintegrating = false; 
+            }
         }
 
-        if (wave.isDisintegrating) {
-            // Remove after wave has transitioned and noise has persisted and faded
-            const timeSinceDisintegrationStart = globalTime - wave.disintegrationEffectStartTime;
-            const totalDisintegrationEffectDuration = CONFIG.disintegration.transitionDurationSeconds + CONFIG.disintegration.noisePersistenceDurationSeconds;
-            return timeSinceDisintegrationStart < totalDisintegrationEffectDuration;
-        } else {
-            // Original removal logic for non-disintegrating waves
+        // Filtering logic: should this wave be kept for rendering?
+        let keepThisWave = true;
+        if (currentWaveState.isDisintegrating) {
+            if (currentWaveState.timeSinceDisintegrationTrigger >= CONFIG.disintegration.transitionDurationSeconds + CONFIG.disintegration.noisePersistenceDurationSeconds) {
+                keepThisWave = false;
+            }
+        } else { // Not disintegrating
             const corners = [
                 { x: 0, y: 0 }, { x: canvas.width, y: 0 },
                 { x: 0, y: canvas.height }, { x: canvas.width, y: canvas.height }
             ];
             let maxDistToCorner = 0;
             corners.forEach(corner => {
-                maxDistToCorner = Math.max(maxDistToCorner, getDistance(wave.x, wave.y, corner.x, corner.y));
+                maxDistToCorner = Math.max(maxDistToCorner, getDistance(waveData.x, waveData.y, corner.x, corner.y));
             });
-
-            const innerEdgeLimit = currentTau - wave.sig * CONFIG.waveDynamics.waveRemovalEdgeFactor;
+            const innerEdgeLimit = currentWaveState.currentTau - waveData.sig * CONFIG.waveDynamics.waveRemovalEdgeFactor;
             if (innerEdgeLimit > maxDistToCorner) {
-                return false;
+                keepThisWave = false;
             }
-            return age < CONFIG.waveDynamics.waveLifetimeSeconds;
+            if (age >= CONFIG.waveDynamics.waveLifetimeSeconds) {
+                keepThisWave = false;
+            }
         }
-    });
+
+        if (keepThisWave) {
+            newActiveWaves.push(currentWaveState);
+        }
+    }
+    activeWaves = newActiveWaves;
+
+    // Sort active waves by creation time if needed, though current rendering doesn't depend on order
+    // activeWaves.sort((a, b) => a.creationTime - b.creationTime);
 }
+
 
 function draw() {
     ctx.fillStyle = CONFIG.backgroundColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Update time display if in debug mode and elements exist
+    if (CONFIG.debugMode.enabled && timeValueDisplay) {
+        timeValueDisplay.textContent = `${globalTime.toFixed(2)}s`;
+    }
+    if (CONFIG.debugMode.enabled && timeSlider && !isPaused) { // Keep slider in sync when playing
+        if (globalTime <= parseFloat(timeSlider.max)) {
+            timeSlider.value = globalTime;
+        }
+    }
+
 
     const imageData = ctx.createImageData(canvas.width, canvas.height);
     const data = imageData.data;
@@ -134,21 +201,29 @@ function draw() {
             const pixelY = gy + gridRes / 2;
             let totalValue = 0;
 
-            waves.forEach(wave => {
+            activeWaves.forEach(wave => { // Iterate over activeWaves
                 let waveAmplitudeFactor = 1.0;
-                if (wave.isDisintegrating && CONFIG.disintegration.enabled) {
-                    const timeSinceDisintegrationStart = globalTime - wave.disintegrationEffectStartTime;
-                    waveAmplitudeFactor = 1.0 - Math.min(1, timeSinceDisintegrationStart / CONFIG.disintegration.transitionDurationSeconds);
-                }
+                let corruptionFactor = 0;
 
-                if (waveAmplitudeFactor > 0) { // Only calculate if wave still has presence
+                if (wave.isDisintegrating && CONFIG.disintegration.enabled) {
+                    if (wave.timeSinceDisintegrationTrigger >= 0 && wave.timeSinceDisintegrationTrigger < CONFIG.disintegration.transitionDurationSeconds) {
+                        waveAmplitudeFactor = 1.0 - wave.disintegrationTransitionProgress;
+                        corruptionFactor = wave.disintegrationTransitionProgress;
+                    } else if (wave.timeSinceDisintegrationTrigger >= CONFIG.disintegration.transitionDurationSeconds) {
+                        waveAmplitudeFactor = 0; // Fully faded after transition
+                    }
+                }
+                
+                // Apply corruption by randomly skipping some contributions
+                if (corruptionFactor > 0 && Math.random() < corruptionFactor * 0.75) { // 0.75 to make it less aggressive initially
+                    // Skip this wave's contribution to this pixel due to corruption
+                } else if (waveAmplitudeFactor > 0) {
                     const dx = pixelX - wave.x;
                     const dy = pixelY - wave.y;
                     const distance = Math.sqrt(dx * dx + dy * dy);
-                    const currentTau = (globalTime - wave.creationTime) * CONFIG.waveDynamics.waveSpeed;
-
-                    if (Math.abs(distance - currentTau) < wave.sig * CONFIG.waveDynamics.waveRemovalEdgeFactor) {
-                        totalValue += pulse(distance, wave.fc, currentTau, wave.sig) * waveAmplitudeFactor;
+                    // currentTau is already on the wave object from updateAndFilterWaves
+                    if (Math.abs(distance - wave.currentTau) < wave.sig * CONFIG.waveDynamics.waveRemovalEdgeFactor) {
+                        totalValue += pulse(distance, wave.fc, wave.currentTau, wave.sig) * waveAmplitudeFactor;
                     }
                 }
             });
@@ -180,32 +255,31 @@ function draw() {
 
     // Draw disintegrating wave noise on top
     if (CONFIG.disintegration.enabled) {
-        waves.forEach(wave => {
-            if (wave.isDisintegrating) {
-                const timeSinceDisintegrationStart = globalTime - wave.disintegrationEffectStartTime;
+        activeWaves.forEach(wave => { // Iterate over activeWaves
+            if (wave.isDisintegrating && wave.timeSinceDisintegrationTrigger >=0) {
+                const timeInEffect = wave.timeSinceDisintegrationTrigger;
 
                 let noiseOverallAlphaFactor = 0;
                 let currentBlockSize = CONFIG.disintegration.noiseBlockSizeStart;
-                const transitionProgress = Math.min(1, timeSinceDisintegrationStart / CONFIG.disintegration.transitionDurationSeconds);
+                const transitionProgress = wave.disintegrationTransitionProgress; // Already calculated
 
                 // Fade-in phase (during wave transition)
-                if (timeSinceDisintegrationStart < CONFIG.disintegration.transitionDurationSeconds) {
+                if (timeInEffect < CONFIG.disintegration.transitionDurationSeconds) {
                     noiseOverallAlphaFactor = transitionProgress;
                     currentBlockSize = CONFIG.disintegration.noiseBlockSizeStart +
                                      (CONFIG.disintegration.noiseBlockSizeEnd - CONFIG.disintegration.noiseBlockSizeStart) * transitionProgress;
                 }
                 // Persistence and fade-out phase (after wave has transitioned)
-                else if (timeSinceDisintegrationStart < CONFIG.disintegration.transitionDurationSeconds + CONFIG.disintegration.noisePersistenceDurationSeconds) {
-                    const timeIntoNoisePersistence = timeSinceDisintegrationStart - CONFIG.disintegration.transitionDurationSeconds;
+                else if (timeInEffect < CONFIG.disintegration.transitionDurationSeconds + CONFIG.disintegration.noisePersistenceDurationSeconds) {
+                    const timeIntoNoisePersistence = timeInEffect - CONFIG.disintegration.transitionDurationSeconds;
                     noiseOverallAlphaFactor = 1.0 - (timeIntoNoisePersistence / CONFIG.disintegration.noisePersistenceDurationSeconds);
-                    currentBlockSize = CONFIG.disintegration.noiseBlockSizeEnd; // Keep end block size during persistence
+                    currentBlockSize = CONFIG.disintegration.noiseBlockSizeEnd;
                 }
 
-                currentBlockSize = Math.max(1, Math.floor(currentBlockSize)); // Ensure block size is at least 1 and an integer
+                currentBlockSize = Math.max(1, Math.floor(currentBlockSize));
 
                 if (noiseOverallAlphaFactor > 0) {
-                    const waveCurrentTau = (globalTime - wave.creationTime) * CONFIG.waveDynamics.waveSpeed;
-                    const currentEffectiveRadius = waveCurrentTau;
+                    const currentEffectiveRadius = wave.currentTau; // Noise band centers on the wave's current theoretical radius
 
                     const bandHalfWidth = (wave.sig * CONFIG.disintegration.noiseSpreadFactor) / 2;
 
@@ -240,14 +314,76 @@ function draw() {
 }
 
 function animationLoop(timestamp) {
-    const deltaTime = (timestamp - (lastTimestamp || timestamp)) / 1000; // seconds
-    lastTimestamp = timestamp;
+    if (isPaused && CONFIG.debugMode.enabled) {
+        return;
+    }
 
-    updateWaves(deltaTime);
+    const actualDeltaTime = (timestamp - (lastTimestamp || timestamp)) / 1000;
+    lastTimestamp = timestamp;
+    
+    if (!(isPaused && CONFIG.debugMode.enabled)) { // Should always be true if we passed the first check
+        globalTime += actualDeltaTime;
+    }
+
+    updateAndFilterWaves(); 
     draw();
 
-    requestAnimationFrame(animationLoop);
+    animationFrameId = requestAnimationFrame(animationLoop);
 }
+
+function togglePause() {
+    if (!CONFIG.debugMode.enabled) return;
+    isPaused = !isPaused;
+    pausePlayButton.textContent = isPaused ? "Play" : "Pause";
+
+    if (!isPaused) { 
+        lastTimestamp = performance.now(); 
+        animationFrameId = requestAnimationFrame(animationLoop);
+    } else { 
+        cancelAnimationFrame(animationFrameId);
+        // Ensure current state is drawn based on current globalTime
+        updateAndFilterWaves();
+        draw();
+    }
+}
+
+function handleTimeSlider() {
+    if (!CONFIG.debugMode.enabled) return;
+    globalTime = parseFloat(timeSlider.value);
+    // timeValueDisplay is updated in draw()
+    
+    // Manually update and draw since the animation loop might be paused
+    // or to show immediate effect even if playing.
+    updateAndFilterWaves(); 
+    draw();
+}
+
+function exportCanvas() {
+    let originalDisplay = null;
+    if (CONFIG.debugMode.enabled && uiControlsContainer) {
+        originalDisplay = uiControlsContainer.style.display;
+        uiControlsContainer.style.display = 'none';
+    }
+
+    // Ensure the canvas is up-to-date with the current globalTime
+    updateAndFilterWaves();
+    draw();
+
+    // Export as PNG
+    const dataURL = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = `wave_cover_time_${globalTime.toFixed(2)}.png`;
+    link.href = dataURL;
+    document.body.appendChild(link); // Required for Firefox
+    link.click();
+    document.body.removeChild(link);
+
+    if (CONFIG.debugMode.enabled && uiControlsContainer && originalDisplay !== null) {
+        uiControlsContainer.style.display = originalDisplay;
+    }
+    console.log(`Canvas exported as PNG for time: ${globalTime.toFixed(2)}s`);
+}
+
 
 // Configuration loading and initialization
 async function loadConfigAndInitialize() {
@@ -263,6 +399,7 @@ async function loadConfigAndInitialize() {
         CONFIG.waveDynamics = {...CONFIG.waveDynamics, ...userConfig.waveDynamics};
         CONFIG.interaction = {...CONFIG.interaction, ...userConfig.interaction};
         CONFIG.disintegration = {...CONFIG.disintegration, ...userConfig.disintegration};
+        CONFIG.debugMode = {...CONFIG.debugMode, ...userConfig.debugMode}; // Load debugMode config
 
         console.log("Configuration loaded:", CONFIG);
     } catch (error) {
@@ -272,6 +409,30 @@ async function loadConfigAndInitialize() {
     // Proceed with initialization using the (potentially updated) CONFIG
     setupCanvas();
     document.body.style.backgroundColor = CONFIG.backgroundColor;
+
+    // Initialize UI Controls if debug mode is enabled
+    if (CONFIG.debugMode.enabled) {
+        uiControlsContainer = document.getElementById('uiControls');
+        pausePlayButton = document.getElementById('pausePlayButton');
+        timeSlider = document.getElementById('timeSlider');
+        timeValueDisplay = document.getElementById('timeValueDisplay');
+        exportButton = document.getElementById('exportButton');
+
+        uiControlsContainer.style.display = 'flex';
+        timeSlider.max = CONFIG.debugMode.timeSliderMax || 60;
+        timeSlider.value = globalTime; // Initialize slider position
+        timeValueDisplay.textContent = `${globalTime.toFixed(2)}s`;
+
+        pausePlayButton.addEventListener('click', togglePause);
+        timeSlider.addEventListener('input', handleTimeSlider);
+        exportButton.addEventListener('click', exportCanvas);
+
+        if (CONFIG.debugMode.startPaused) {
+            isPaused = true;
+            pausePlayButton.textContent = "Play";
+        }
+    }
+
 
     if (CONFIG.interaction.interactive) {
         canvas.addEventListener('click', (event) => {
@@ -290,7 +451,13 @@ async function loadConfigAndInitialize() {
     }
 
     lastTimestamp = performance.now();
-    requestAnimationFrame(animationLoop);
+    // If starting paused, do an initial calculation and draw
+    if (isPaused && CONFIG.debugMode.enabled) {
+        updateAndFilterWaves();
+        draw();
+    } else { // If not starting paused, start the animation loop
+        animationFrameId = requestAnimationFrame(animationLoop);
+    }
 }
 
 // Initialization
@@ -300,7 +467,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 window.addEventListener('resize', () => {
     // Re-evaluate canvas dimensions based on config/window size
-    CONFIG.canvasWidth = (CONFIG.canvasWidth === "innerWidth" || CONFIG.canvasWidth === window.innerWidth ? window.innerWidth : parseInt(CONFIG.canvasWidth, 10));
-    CONFIG.canvasHeight = (CONFIG.canvasHeight === "innerHeight" || CONFIG.canvasHeight === window.innerHeight ? window.innerHeight : parseInt(CONFIG.canvasHeight, 10));
+    CONFIG.canvasWidth = (CONFIG.canvasWidth === "innerWidth" || typeof CONFIG.canvasWidth === 'number' && CONFIG.canvasWidth === window.innerWidth ? window.innerWidth : parseInt(CONFIG.canvasWidth, 10));
+    CONFIG.canvasHeight = (CONFIG.canvasHeight === "innerHeight" || typeof CONFIG.canvasHeight === 'number' && CONFIG.canvasHeight === window.innerHeight ? window.innerHeight : parseInt(CONFIG.canvasHeight, 10));
     setupCanvas();
+    // When resizing, if paused, re-filter and redraw the current state
+    if (isPaused && CONFIG.debugMode.enabled) {
+        updateAndFilterWaves();
+        draw();
+    }
 });

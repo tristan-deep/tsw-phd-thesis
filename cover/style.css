@@ -3,6 +3,7 @@ body {
     overflow: hidden;
     background-color: #1a1a1a; /* Default dark background, can be overridden by JS config */
     display: flex;
+    flex-direction: column; /* Align canvas and controls vertically */
     justify-content: center;
     align-items: center;
     height: 100vh;
@@ -10,4 +11,24 @@ body {
 
 canvas {
     display: block;
+    /* Adjust canvas size if controls are visible, or use absolute positioning for controls */
+}
+
+#uiControls {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background-color: rgba(50, 50, 50, 0.8);
+    padding: 10px;
+    border-radius: 5px;
+    color: white;
+    display: flex; /* Will be set to flex by JS if debug mode is on */
+    align-items: center;
+    gap: 10px;
+    z-index: 1000; /* Ensure controls are on top */
+}
+
+#uiControls label, #uiControls span {
+    margin-left: 5px;
+    margin-right: 5px;
 }

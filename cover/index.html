@@ -7,6 +7,13 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <div id="uiControls" style="display: none;">
+        <button id="pausePlayButton">Pause</button>
+        <label for="timeSlider">Time:</label>
+        <input type="range" id="timeSlider" min="0" value="0" step="0.01">
+        <span id="timeValueDisplay">0.00s</span>
+        <button id="exportButton">Export PNG</button>
+    </div>
     <canvas id="waveCanvas"></canvas>
     <script src="script.js" defer></script>
 </body>

@@ -30,5 +30,10 @@
         "numNoiseBlocksPerWave": 300,
         "noiseMaxBlockAlpha": 0.7,
         "noiseSpreadFactor": 2.8
+    },
+    "debugMode": {
+        "enabled": true,
+        "startPaused": true,
+        "timeSliderMax": 60
     }
 }
