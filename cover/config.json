@@ -1,0 +1,34 @@
+{
+    "canvasWidth": "innerWidth",
+    "canvasHeight": "innerHeight",
+    "backgroundColor": "#111111",
+    "waveVisuals": {
+        "positiveColorBase": [0, 255, 255],
+        "negativeColorBase": [255, 0, 255],
+        "maxAmplitude": 1.0,
+        "gridResolution": 4
+    },
+    "waveDynamics": {
+        "carrierFrequency": 5,
+        "gaussianWidth": 20,
+        "waveSpeed": 50,
+        "waveLifetimeSeconds": 25,
+        "waveRemovalEdgeFactor": 4
+    },
+    "interaction": {
+        "interactive": true,
+        "maxWaves": 10,
+        "numInitialWaves": 2
+    },
+    "disintegration": {
+        "enabled": true,
+        "startAgeSeconds": 6,
+        "transitionDurationSeconds": 7,
+        "noisePersistenceDurationSeconds": 4,
+        "noiseBlockSizeStart": 2,
+        "noiseBlockSizeEnd": 10,
+        "numNoiseBlocksPerWave": 300,
+        "noiseMaxBlockAlpha": 0.7,
+        "noiseSpreadFactor": 2.8
+    }
+}
