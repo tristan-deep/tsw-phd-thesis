@@ -22,9 +22,9 @@
     },
     "disintegration": {
         "enabled": true,
-        "startAgeSeconds": 6,
-        "transitionDurationSeconds": 7,
-        "noisePersistenceDurationSeconds": 4,
+        "startAgeSeconds": 4,
+        "transitionDurationSeconds": 6,
+        "noisePersistenceDurationSeconds": 0,
         "noiseBlockSizeStart": 2,
         "noiseBlockSizeEnd": 10,
         "numNoiseBlocksPerWave": 300,
@@ -32,7 +32,7 @@
         "noiseSpreadFactor": 2.8
     },
     "debugMode": {
-        "enabled": true,
+        "enabled": false,
         "startPaused": true,
         "timeSliderMax": 60
     }

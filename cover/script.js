@@ -143,7 +143,8 @@ function updateAndFilterWaves() {
         // Filtering logic: should this wave be kept for rendering?
         let keepThisWave = true;
         if (currentWaveState.isDisintegrating) {
-            if (currentWaveState.timeSinceDisintegrationTrigger >= CONFIG.disintegration.transitionDurationSeconds + CONFIG.disintegration.noisePersistenceDurationSeconds) {
+            // Wave is removed once its transition is complete
+            if (currentWaveState.timeSinceDisintegrationTrigger >= CONFIG.disintegration.transitionDurationSeconds) {
                 keepThisWave = false;
             }
         } else { // Not disintegrating
@@ -263,17 +264,16 @@ function draw() {
                 let currentBlockSize = CONFIG.disintegration.noiseBlockSizeStart;
                 const transitionProgress = wave.disintegrationTransitionProgress; // Already calculated
 
-                // Fade-in phase (during wave transition)
                 if (timeInEffect < CONFIG.disintegration.transitionDurationSeconds) {
-                    noiseOverallAlphaFactor = transitionProgress;
+                    // Noise alpha fades in and then out during the transition period.
+                    // Peaks at transitionProgress = 0.5
+                    noiseOverallAlphaFactor = Math.sin(transitionProgress * Math.PI);
+
                     currentBlockSize = CONFIG.disintegration.noiseBlockSizeStart +
                                      (CONFIG.disintegration.noiseBlockSizeEnd - CONFIG.disintegration.noiseBlockSizeStart) * transitionProgress;
-                }
-                // Persistence and fade-out phase (after wave has transitioned)
-                else if (timeInEffect < CONFIG.disintegration.transitionDurationSeconds + CONFIG.disintegration.noisePersistenceDurationSeconds) {
-                    const timeIntoNoisePersistence = timeInEffect - CONFIG.disintegration.transitionDurationSeconds;
-                    noiseOverallAlphaFactor = 1.0 - (timeIntoNoisePersistence / CONFIG.disintegration.noisePersistenceDurationSeconds);
-                    currentBlockSize = CONFIG.disintegration.noiseBlockSizeEnd;
+                } else {
+                    // After transition duration, noise should be fully faded.
+                    noiseOverallAlphaFactor = 0;
                 }
 
                 currentBlockSize = Math.max(1, Math.floor(currentBlockSize));
