@@ -129,14 +129,14 @@ function updateAndFilterWaves() {
             currentWaveState.isDisintegrating = true;
             const disintegrationEffectActualStartTime = waveData.creationTime + CONFIG.disintegration.startAgeSeconds;
             currentWaveState.timeSinceDisintegrationTrigger = globalTime - disintegrationEffectActualStartTime;
-            
+
             if (currentWaveState.timeSinceDisintegrationTrigger >= 0) {
                  currentWaveState.disintegrationTransitionProgress = Math.min(1, currentWaveState.timeSinceDisintegrationTrigger / CONFIG.disintegration.transitionDurationSeconds);
             } else {
                 // This case (negative timeSinceDisintegrationTrigger) implies globalTime is before the trigger,
                 // so it shouldn't be disintegrating yet. The age > startAgeSeconds check should handle this.
                 // For safety, reset disintegration state if somehow triggered prematurely.
-                currentWaveState.isDisintegrating = false; 
+                currentWaveState.isDisintegrating = false;
             }
         }
 
@@ -213,7 +213,7 @@ function draw() {
                         waveAmplitudeFactor = 0; // Fully faded after transition
                     }
                 }
-                
+
                 // Apply corruption by randomly skipping some contributions
                 if (corruptionFactor > 0 && Math.random() < corruptionFactor * 0.75) { // 0.75 to make it less aggressive initially
                     // Skip this wave's contribution to this pixel due to corruption
@@ -320,12 +320,12 @@ function animationLoop(timestamp) {
 
     const actualDeltaTime = (timestamp - (lastTimestamp || timestamp)) / 1000;
     lastTimestamp = timestamp;
-    
+
     if (!(isPaused && CONFIG.debugMode.enabled)) { // Should always be true if we passed the first check
         globalTime += actualDeltaTime;
     }
 
-    updateAndFilterWaves(); 
+    updateAndFilterWaves();
     draw();
 
     animationFrameId = requestAnimationFrame(animationLoop);
@@ -336,10 +336,10 @@ function togglePause() {
     isPaused = !isPaused;
     pausePlayButton.textContent = isPaused ? "Play" : "Pause";
 
-    if (!isPaused) { 
-        lastTimestamp = performance.now(); 
+    if (!isPaused) {
+        lastTimestamp = performance.now();
         animationFrameId = requestAnimationFrame(animationLoop);
-    } else { 
+    } else {
         cancelAnimationFrame(animationFrameId);
         // Ensure current state is drawn based on current globalTime
         updateAndFilterWaves();
@@ -351,10 +351,10 @@ function handleTimeSlider() {
     if (!CONFIG.debugMode.enabled) return;
     globalTime = parseFloat(timeSlider.value);
     // timeValueDisplay is updated in draw()
-    
+
     // Manually update and draw since the animation loop might be paused
     // or to show immediate effect even if playing.
-    updateAndFilterWaves(); 
+    updateAndFilterWaves();
     draw();
 }
 
