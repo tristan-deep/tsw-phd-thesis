@@ -3,14 +3,19 @@
     "canvasHeight": "innerHeight",
     "backgroundColor": "#111111",
     "waveVisuals": {
-        "positiveColorBase": [0, 255, 255],
-        "negativeColorBase": [255, 0, 255],
         "maxAmplitude": 1.0,
-        "gridResolution": 4
+        "gridResolution": 2,
+        "colormap": [
+            { "pos": 0.0,  "color": [0, 0, 255] },
+            { "pos": 0.25, "color": [128, 0, 128] },
+            { "pos": 0.5,  "color": [0, 0, 0] },
+            { "pos": 0.75, "color": [255, 128, 0] },
+            { "pos": 1.0,  "color": [255, 0, 0] }
+        ]
     },
     "waveDynamics": {
-        "carrierFrequency": 5,
-        "gaussianWidth": 20,
+        "carrierFrequency": 2.5,
+        "gaussianWidth": 25,
         "waveSpeed": 50,
         "waveLifetimeSeconds": 25,
         "waveRemovalEdgeFactor": 4
@@ -22,11 +27,11 @@
     },
     "disintegration": {
         "enabled": true,
-        "startAgeSeconds": 4,
-        "transitionDurationSeconds": 6,
+        "startAgeSeconds": 6,
+        "transitionDurationSeconds": 7,
         "noisePersistenceDurationSeconds": 0,
         "noiseBlockSizeStart": 2,
-        "noiseBlockSizeEnd": 10,
+        "noiseBlockSizeEnd": 12,
         "numNoiseBlocksPerWave": 300,
         "noiseMaxBlockAlpha": 0.7,
         "noiseSpreadFactor": 2.8

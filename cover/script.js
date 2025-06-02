@@ -3,10 +3,16 @@ let CONFIG = { // Default config, will be overridden by JSON
     canvasHeight: window.innerHeight,
     backgroundColor: '#111111',
     waveVisuals: {
-        positiveColorBase: [0, 255, 255],
-        negativeColorBase: [255, 0, 255],
+        // positiveColorBase and negativeColorBase removed
         maxAmplitude: 1.0,
         gridResolution: 4,
+        colormap: [ // Default colormap if config.json fails
+            { "pos": 0.0,  "color": [0, 0, 255] },
+            { "pos": 0.25, "color": [128, 0, 128] },
+            { "pos": 0.5,  "color": [0, 0, 0] },
+            { "pos": 0.75, "color": [255, 128, 0] },
+            { "pos": 1.0,  "color": [255, 0, 0] }
+        ]
     },
     waveDynamics: {
         carrierFrequency: 5,
@@ -176,6 +182,40 @@ function updateAndFilterWaves() {
 }
 
 
+function getColorFromColormap(value, colormap) {
+    // Ensure colormap is sorted by position
+    // const sortedColormap = [...colormap].sort((a, b) => a.pos - b.pos);
+    // Assuming colormap from config is already sorted for performance.
+    // If not, uncomment and use sortedColormap.
+
+    // Normalize value from -1 to 1 range (relative to maxAmplitude) to 0-1 for colormap lookup
+    const normalizedPos = (value + 1) / 2;
+
+    if (normalizedPos <= colormap[0].pos) {
+        return colormap[0].color;
+    }
+    if (normalizedPos >= colormap[colormap.length - 1].pos) {
+        return colormap[colormap.length - 1].color;
+    }
+
+    for (let i = 0; i < colormap.length - 1; i++) {
+        const stop1 = colormap[i];
+        const stop2 = colormap[i + 1];
+
+        if (normalizedPos >= stop1.pos && normalizedPos <= stop2.pos) {
+            const t = (normalizedPos - stop1.pos) / (stop2.pos - stop1.pos);
+            if (isNaN(t) || !isFinite(t)) return stop1.color; // Avoid issues if stop1.pos === stop2.pos
+
+            const r = Math.round(stop1.color[0] * (1 - t) + stop2.color[0] * t);
+            const g = Math.round(stop1.color[1] * (1 - t) + stop2.color[1] * t);
+            const b = Math.round(stop1.color[2] * (1 - t) + stop2.color[2] * t);
+            return [r, g, b];
+        }
+    }
+    return colormap[colormap.length - 1].color; // Should be caught by earlier checks
+}
+
+
 function draw() {
     ctx.fillStyle = CONFIG.backgroundColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -230,11 +270,10 @@ function draw() {
             });
 
             if (totalValue !== 0) {
-                const alpha = Math.min(1, Math.abs(totalValue) / CONFIG.waveVisuals.maxAmplitude);
-                let r, g, b;
+                const normalizedIntensity = Math.max(-1, Math.min(1, totalValue / CONFIG.waveVisuals.maxAmplitude));
+                const alpha = Math.min(1, Math.abs(totalValue) / CONFIG.waveVisuals.maxAmplitude); // Alpha based on magnitude
 
-                if (totalValue > 0) [r, g, b] = CONFIG.waveVisuals.positiveColorBase;
-                else [r, g, b] = CONFIG.waveVisuals.negativeColorBase;
+                const [r, g, b] = getColorFromColormap(normalizedIntensity, CONFIG.waveVisuals.colormap);
 
                 for (let offsetY = 0; offsetY < gridRes; offsetY++) {
                     for (let offsetX = 0; offsetX < gridRes; offsetX++) {
@@ -296,10 +335,16 @@ function draw() {
 
                         if (blockX < 0 || blockX + currentBlockSize > canvas.width || blockY < 0 || blockY + currentBlockSize > canvas.height) continue;
 
-                        const randomVal = Math.random();
-                        let r, g, b;
-                        if (randomVal > 0.5) [r,g,b] = CONFIG.waveVisuals.positiveColorBase;
-                        else [r,g,b] = CONFIG.waveVisuals.negativeColorBase;
+                        const randomVal = Math.random(); // This determines which side of the "zero" point for color
+                        // For noise, we can simplify and pick a color based on a random intensity
+                        // or tie it to the wave's original positive/negative nature if we stored that.
+                        // Here, let's use a simplified approach: pick a random point on the colormap.
+                        // Or, more consistently, use a fixed intensity for noise, e.g., slightly positive or negative.
+                        // For now, let's use the randomVal to pick a side of the colormap.
+                        const noiseIntensityForColor = (randomVal - 0.5) * 2 * 0.5; // e.g., map to -0.5 to 0.5 range
+
+                        const [r,g,b] = getColorFromColormap(noiseIntensityForColor, CONFIG.waveVisuals.colormap);
+
 
                         const radialEnvelope = Math.exp(-0.5 * Math.pow((dist - currentEffectiveRadius) / bandHalfWidth, 2));
                         const finalAlpha = noiseOverallAlphaFactor * radialEnvelope * CONFIG.disintegration.noiseMaxBlockAlpha * (0.5 + randomVal * 0.5);
